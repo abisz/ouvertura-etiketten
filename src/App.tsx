@@ -40,7 +40,7 @@ export default function App() {
                                             onChange={e => updateData({ingredients: e.target.value})}/></label>
                 <label>Herstellungsmonat<input type="month" value={data.productionMonth}
                                                 onChange={e => updateData({productionMonth: e.target.value})}/></label>
-                <label>Chagennummer<input value={data.batchNumber}
+                <label>Chargennummer<input value={data.batchNumber}
                                                    onChange={e => updateData({batchNumber: normalizeBatchNumber(e.target.value)})}/></label>
                 <p className="hint fixed-sheet">Für Etikettenpapier: A4, 8 Zeilen x 6 Spalten (48 Etiketten).</p>
                 <button type="button" onClick={downloadPdf}>Download A4 PDF</button>

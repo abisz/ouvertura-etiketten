@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { LabelData } from '../types';
 import { formatManufacturedDate, normalizeBatchNumber } from '../formatting';
 import { A4, mmToPt } from './measurements';
@@ -15,20 +15,201 @@ const FIXED_LAYOUT = {
 const LABEL_WIDTH_MM = (A4.widthMm - FIXED_LAYOUT.marginLeftMm * 2 - FIXED_LAYOUT.gapXMm * (FIXED_LAYOUT.columns - 1)) / FIXED_LAYOUT.columns;
 const LABEL_HEIGHT_MM = (A4.heightMm - FIXED_LAYOUT.marginTopMm * 2 - FIXED_LAYOUT.gapYMm * (FIXED_LAYOUT.rows - 1)) / FIXED_LAYOUT.rows;
 
-function wrapText(text: string, maxWidth: number, font: any, size: number): string[] {
-  const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  const lines: string[] = [];
-  let line = '';
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
-    if (font.widthOfTextAtSize(next, size) <= maxWidth) line = next;
-    else { if (line) lines.push(line); line = word; }
+// Base font sizes / spacings at scale 1.0
+const BASE_TITLE_SIZE = 12;
+const BASE_INGREDIENT_SIZE = 8.5;
+const BASE_COOL_SIZE = 8;
+const BASE_COOL_LINE_HEIGHT = 12; // text size + leading, applied as y-decrement after the cool line
+const FOOTER_FONT_MAX = 7.5;
+const FOOTER_FONT_MIN = 6;
+const FOOTER_GAP = 2; // minimum gap between last ingredient baseline and footer
+
+// Scaling search parameters
+const SCALE_MAX = 1.0;
+const SCALE_MIN = 0.3;
+const SCALE_STEP = 0.025;
+
+function splitWord(word: string, maxWidth: number, font: PDFFont, size: number): string[] {
+  if (!word) return [];
+
+  const parts: string[] = [];
+  let current = '';
+
+  for (const char of word) {
+    const next = `${current}${char}`;
+    if (!current || font.widthOfTextAtSize(next, size) <= maxWidth) {
+      current = next;
+      continue;
+    }
+
+    parts.push(current);
+    current = char;
   }
-  if (line) lines.push(line);
+
+  if (current) parts.push(current);
+  return parts;
+}
+
+/** Splits "Pilz-Gemüse-Aufstrich" → ["Pilz-", "Gemüse-", "Aufstrich"] (hyphen stays with preceding segment). */
+function splitAtHyphens(word: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  for (const char of word) {
+    current += char;
+    if (char === '-') { parts.push(current); current = ''; }
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+function wrapText(text: string, maxWidth: number, font: PDFFont, size: number, wordSplitAllowed = true): string[] {
+  const paragraphs = text
+    .replace(/\r\n/g, '\n')
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (!paragraphs.length) return [];
+
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(' ');
+    let line = '';
+
+    for (let wi = 0; wi < words.length; wi++) {
+      const word = words[wi];
+      const wordPrefix = wi === 0 ? '' : ' ';
+
+      // Build atoms: units that must not be broken further.
+      // Consecutive atoms from the same word are joined WITHOUT a separator;
+      // atoms from different words are joined with a space (wordPrefix).
+      type Atom = { text: string; prefix: string };
+      let atoms: Atom[];
+
+      if (!wordSplitAllowed) {
+        // Break only at hyphens that are already present in the word.
+        const hParts = splitAtHyphens(word);
+        atoms = hParts.map((p, i) => ({ text: p, prefix: i === 0 ? wordPrefix : '' }));
+      } else if (font.widthOfTextAtSize(word, size) > maxWidth) {
+        // Fall back to character-level splitting for oversized words.
+        const cParts = splitWord(word, maxWidth, font, size);
+        atoms = cParts.map((p, i) => ({ text: p, prefix: i === 0 ? wordPrefix : '' }));
+      } else {
+        atoms = [{ text: word, prefix: wordPrefix }];
+      }
+
+      for (const atom of atoms) {
+        const candidate = line ? `${line}${atom.prefix}${atom.text}` : atom.text;
+        if (!line || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+          line = candidate;
+        } else {
+          lines.push(line);
+          line = atom.text; // new line — never starts with a prefix
+        }
+      }
+    }
+
+    if (line) lines.push(line);
+  }
+
   return lines;
 }
 
-function drawCenteredText(page: any, text: string, font: any, size: number, x: number, y: number, width: number, color?: { r: number; g: number; b: number; }) {
+function ellipsizeText(text: string, maxWidth: number, font: PDFFont, size: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (font.widthOfTextAtSize(normalized, size) <= maxWidth) return normalized;
+
+  const ellipsis = '…';
+  if (font.widthOfTextAtSize(ellipsis, size) > maxWidth) return '';
+
+  let result = normalized;
+  while (result && font.widthOfTextAtSize(`${result}${ellipsis}`, size) > maxWidth) {
+    result = result.slice(0, -1).trimEnd();
+  }
+
+  return result ? `${result}${ellipsis}` : ellipsis;
+}
+
+interface FitResult {
+  titleSize: number;
+  titleLineHeight: number;
+  titleLines: string[];
+  coolSize: number;
+  coolLineHeight: number;
+  ingredientSize: number;
+  ingredientLineHeight: number;
+  ingredientLines: string[];
+}
+
+/**
+ * Finds the largest uniform scale factor (applied to all base font sizes) such that
+ * the complete title + optional cool-line + all ingredient lines fit within `availableHeight`.
+ * Nothing is ever truncated.
+ *
+ * Height model (y decreases downward in PDF space):
+ *   - first title baseline : topY - titleSize
+ *   - after N title lines  : descend N * titleLineHeight
+ *   - after cool line      : descend coolLineHeight (if keepCooled)
+ *   - N ingredient lines at y, y-iLH, …, y-(M-1)*iLH
+ *
+ * Constraint: titleSize + N*tLH + coolLH + (M-1)*iLH ≤ availableHeight
+ */
+function fitContent(
+  titleText: string,
+  ingredientText: string,
+  keepCooled: boolean,
+  availableHeight: number,
+  contentWidth: number,
+  bold: PDFFont,
+  regular: PDFFont,
+): FitResult {
+  let fallback: FitResult | null = null;
+
+  for (let scale = SCALE_MAX; scale >= SCALE_MIN - SCALE_STEP / 2; scale -= SCALE_STEP) {
+    const s = Math.max(SCALE_MIN, scale);
+    const titleSize = BASE_TITLE_SIZE * s;
+    const titleLineHeight = titleSize + 1;
+    const ingredientSize = BASE_INGREDIENT_SIZE * s;
+    const ingredientLineHeight = ingredientSize + 1.5;
+    const coolSize = BASE_COOL_SIZE * s;
+    const coolLineHeight = BASE_COOL_LINE_HEIGHT * s;
+
+    const titleLines = wrapText(titleText, contentWidth, bold, titleSize, false);
+    const ingredientLines = wrapText(ingredientText, contentWidth, regular, ingredientSize);
+
+    const heightUsed =
+      titleSize +
+      titleLines.length * titleLineHeight +
+      (keepCooled ? coolLineHeight : 0) +
+      Math.max(0, ingredientLines.length - 1) * ingredientLineHeight;
+
+    const result: FitResult = {
+      titleSize, titleLineHeight, titleLines,
+      coolSize, coolLineHeight,
+      ingredientSize, ingredientLineHeight, ingredientLines,
+    };
+
+    if (heightUsed <= availableHeight) return result;
+    if (!fallback) fallback = result; // smallest attempted → last-resort fallback
+  }
+
+  return fallback!;
+}
+
+function fitSingleLine(text: string, maxWidth: number, font: PDFFont, preferredSize: number, minSize: number) {
+  for (let size = preferredSize; size >= minSize; size -= 0.25) {
+    if (font.widthOfTextAtSize(text, size) <= maxWidth) return { text, size };
+  }
+
+  return {
+    text: ellipsizeText(text, maxWidth, font, minSize),
+    size: minSize,
+  };
+}
+
+function drawCenteredText(page: PDFPage, text: string, font: PDFFont, size: number, x: number, y: number, width: number, color?: { r: number; g: number; b: number; }) {
   const textWidth = font.widthOfTextAtSize(text, size);
   page.drawText(text, {
     x: x + (width - textWidth) / 2,
@@ -52,25 +233,43 @@ export async function generateLabelsPdf(data: LabelData) {
       const yTop = pageHeight - mmToPt(FIXED_LAYOUT.marginTopMm + r * (LABEL_HEIGHT_MM + FIXED_LAYOUT.gapYMm));
       const w = mmToPt(LABEL_WIDTH_MM);
       const h = mmToPt(LABEL_HEIGHT_MM);
-      const pad = mmToPt(4);
-      let y = yTop - pad - 12;
+      const pad = mmToPt(2);
+      const contentWidth = w - pad * 2;
+      const topY = yTop - pad;
+      const footerY = yTop - h + pad;
 
-      const titleLines = wrapText(data.title || 'Product name', w - pad * 2, bold, 12).slice(0, 2);
-      for (const line of titleLines) {
-        drawCenteredText(page, line, bold, 12, x, y, w);
-        y -= 13;
-      }
-      if (data.keepCooled) {
-        drawCenteredText(page, '(kühl lagern)', regular, 8, x, y, w);
-        y -= 12;
-      }
-      const ingredientLines = wrapText(data.ingredients || 'Ingredients', w - pad * 2, regular, 8.5).slice(0, 8);
-      for (const line of ingredientLines) {
-        drawCenteredText(page, line, regular, 8.5, x, y, w);
-        y -= 10;
-      }
+      const titleText = data.title.trim() || 'Product name';
+      const ingredientText = data.ingredients.trim() || 'Ingredients';
       const footer = `${formatManufacturedDate(data.productionMonth)} · ${normalizeBatchNumber(data.batchNumber)}`;
-      drawCenteredText(page, footer, regular, 7.5, x, yTop - h + pad, w, { r: 0.25, g: 0.25, b: 0.25 });
+
+      // Footer shrinks to fit if needed, but is always a single line (format is fixed/short)
+      const footerLayout = fitSingleLine(footer, contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN);
+      // Available height for title + cool line + ingredients
+      const availableHeight = topY - (footerY + footerLayout.size + FOOTER_GAP);
+
+      const {
+        titleSize, titleLineHeight, titleLines,
+        coolSize, coolLineHeight,
+        ingredientSize, ingredientLineHeight, ingredientLines,
+      } = fitContent(titleText, ingredientText, data.keepCooled, availableHeight, contentWidth, bold, regular);
+
+      let y = topY - titleSize;
+      for (const line of titleLines) {
+        drawCenteredText(page, line, bold, titleSize, x, y, w);
+        y -= titleLineHeight;
+      }
+
+      if (data.keepCooled) {
+        drawCenteredText(page, '(kühl lagern)', regular, coolSize, x, y, w);
+        y -= coolLineHeight;
+      }
+
+      for (const line of ingredientLines) {
+        drawCenteredText(page, line, regular, ingredientSize, x, y, w);
+        y -= ingredientLineHeight;
+      }
+
+      drawCenteredText(page, footerLayout.text, regular, footerLayout.size, x, footerY, w, { r: 0.25, g: 0.25, b: 0.25 });
     }
   }
   const bytes = await pdf.save();

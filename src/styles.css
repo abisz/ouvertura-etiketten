@@ -83,7 +83,9 @@ button {
 .label-preview h2 {
     margin: 0 0 8px;
     font-size: 20px;
-    line-height: 1.15
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+    word-break: break-word
 }
 
 .cool {
@@ -93,13 +95,17 @@ button {
 
 .label-preview p {
     font-size: 14px;
-    line-height: 1.35
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    word-break: break-word
 }
 
 .label-preview footer {
     margin-top: auto;
     font-size: 12px;
-    color: #666
+    color: #666;
+    overflow-wrap: anywhere;
+    word-break: break-word
 }
 
 .hint {
