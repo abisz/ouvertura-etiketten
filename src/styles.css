@@ -1,0 +1,117 @@
+:root {
+    font-family: Inter, system-ui, sans-serif;
+    color: #213126;
+    background: #f7f4ee
+}
+
+body {
+    margin: 0
+}
+
+main {
+    max-width: 1100px;
+    margin: auto;
+    padding: 32px
+}
+
+header {
+    margin-bottom: 24px
+}
+
+.grid {
+    display: grid;
+    grid-template-columns:1.4fr .9fr;
+    gap: 24px
+}
+
+.card {
+    background: white;
+    border: 1px solid #ddd5c7;
+    border-radius: 16px;
+    padding: 22px;
+    box-shadow: 0 8px 30px #0000000d
+}
+
+label {
+    display: block;
+    font-weight: 650;
+    margin: 12px 0 6px
+}
+
+input, textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #cfc8ba;
+    border-radius: 10px;
+    padding: 10px;
+    font: inherit;
+    margin-top: 6px
+}
+
+.check {
+    display: flex;
+    gap: 10px;
+    align-items: center
+}
+
+.check input {
+    width: auto
+}
+
+button {
+    margin-top: 20px;
+    border: 0;
+    border-radius: 12px;
+    background: #315b3a;
+    color: white;
+    padding: 13px 18px;
+    font-weight: 750;
+    font-size: 16px;
+    cursor: pointer
+}
+
+.label-preview {
+    width: 280px;
+    min-height: 168px;
+    background: #fffdf7;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    text-align: center
+}
+
+.label-preview h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.15
+}
+
+.cool {
+    font-size: 14px;
+    margin-bottom: 8px
+}
+
+.label-preview p {
+    font-size: 14px;
+    line-height: 1.35
+}
+
+.label-preview footer {
+    margin-top: auto;
+    font-size: 12px;
+    color: #666
+}
+
+.hint {
+    color: #6b655b
+}
+
+.fixed-sheet {
+    margin: 16px 0 0
+}
+
+@media (max-width: 800px) {
+    .grid {
+        grid-template-columns:1fr
+    }
+}
