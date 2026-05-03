@@ -1,7 +1,6 @@
 import {useState} from 'react';
 import type {LabelData} from './types';
 import {generateLabelsPdf} from './pdf/generateLabelsPdf';
-import {LabelPreview} from './components/LabelPreview';
 import {getCurrentYearMonthValue, normalizeBatchNumber} from './formatting';
 // @ts-ignore
 import './styles.css';
@@ -23,7 +22,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${data.title || 'labels'}-${data.batchNumber || 'batch'}.pdf`;
+        a.download = `${data.batchNumber || 'batch'} ${data.title || 'labels'}.pdf`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -45,8 +44,6 @@ export default function App() {
                 <p className="hint fixed-sheet">Für Etikettenpapier: A4, 8 Zeilen x 6 Spalten (48 Etiketten).</p>
                 <button type="button" onClick={downloadPdf}>Download A4 PDF</button>
             </form>
-            <aside className="card"><h2>Vorschau</h2><LabelPreview data={data}/><p className="hint">PDF enthält 48
-                Etiketten auf einer A4 Seite.</p></aside>
         </section>
     </main>;
 }

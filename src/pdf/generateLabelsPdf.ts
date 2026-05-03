@@ -235,17 +235,18 @@ export async function generateLabelsPdf(data: LabelData) {
       const h = mmToPt(LABEL_HEIGHT_MM);
       const pad = mmToPt(2);
       const contentWidth = w - pad * 2;
-      const topY = yTop - pad;
-      const footerY = yTop - h + pad;
+      const topY = yTop - pad;               // top edge of content area
+      const contentHeight = h - 2 * pad;    // total usable height
 
       const titleText = data.title.trim() || 'Product name';
       const ingredientText = data.ingredients.trim() || 'Ingredients';
       const footer = `${formatManufacturedDate(data.productionMonth)} · ${normalizeBatchNumber(data.batchNumber)}`;
 
-      // Footer shrinks to fit if needed, but is always a single line (format is fixed/short)
+      // Footer is always a short fixed-format line; shrink font if needed.
       const footerLayout = fitSingleLine(footer, contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN);
-      // Available height for title + cool line + ingredients
-      const availableHeight = topY - (footerY + footerLayout.size + FOOTER_GAP);
+
+      // Space available for the body (title + cool + ingredients); footer + gap sit below.
+      const availableHeight = contentHeight - footerLayout.size - FOOTER_GAP;
 
       const {
         titleSize, titleLineHeight, titleLines,
@@ -253,7 +254,30 @@ export async function generateLabelsPdf(data: LabelData) {
         ingredientSize, ingredientLineHeight, ingredientLines,
       } = fitContent(titleText, ingredientText, data.keepCooled, availableHeight, contentWidth, bold, regular);
 
-      let y = topY - titleSize;
+      // --- Relative layout simulation (y = 0 at first title baseline) ---
+      // Tracks how far each element is below the first title baseline.
+      let yRel = 0;
+      let lastYRel = 0;
+      for (const _ of titleLines)     { lastYRel = yRel; yRel -= titleLineHeight; }
+      if (data.keepCooled)             { lastYRel = yRel; yRel -= coolLineHeight; }
+      for (const _ of ingredientLines) { lastYRel = yRel; yRel -= ingredientLineHeight; }
+
+      // Footer sits FOOTER_GAP below the last drawn element's baseline.
+      // We subtract footerSize so the footer's cap height clears the content above by FOOTER_GAP.
+      const footerRelY = lastYRel - footerLayout.size - FOOTER_GAP;
+
+      // Visual block height: from cap of title (≈ titleSize above first baseline)
+      // down to the footer baseline.
+      const blockHeight = titleSize - footerRelY; // footerRelY ≤ 0, so this is positive
+
+      // Vertical centering: push block down so equal whitespace appears top and bottom.
+      const topPadding = Math.max(0, (contentHeight - blockHeight) / 2);
+
+      // Absolute position of first title baseline.
+      const firstTitleBaseline = topY - topPadding - titleSize;
+
+      // --- Draw ---
+      let y = firstTitleBaseline;
       for (const line of titleLines) {
         drawCenteredText(page, line, bold, titleSize, x, y, w);
         y -= titleLineHeight;
@@ -269,7 +293,9 @@ export async function generateLabelsPdf(data: LabelData) {
         y -= ingredientLineHeight;
       }
 
-      drawCenteredText(page, footerLayout.text, regular, footerLayout.size, x, footerY, w, { r: 0.25, g: 0.25, b: 0.25 });
+      // Footer: right after the ingredients, centered.
+      drawCenteredText(page, footerLayout.text, regular, footerLayout.size,
+        x, firstTitleBaseline + footerRelY, w, { r: 0.25, g: 0.25, b: 0.25 });
     }
   }
   const bytes = await pdf.save();
