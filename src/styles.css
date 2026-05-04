@@ -1,27 +1,37 @@
 :root {
     font-family: Inter, system-ui, sans-serif;
     color: #213126;
-    background: #f7f4ee
+    background: #f7f4ee;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%
 }
 
 body {
-    margin: 0
+    margin: 0;
+    min-height: 100vh
 }
 
 main {
     max-width: 1100px;
     margin: auto;
-    padding: 32px
+    padding: clamp(16px, 4vw, 32px)
 }
 
 header {
     margin-bottom: 24px
 }
 
+header h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 6vw, 2.5rem);
+    line-height: 1.1
+}
+
 .grid {
     display: grid;
     grid-template-columns: minmax(0, 720px);
     justify-content: center;
+    width: 100%;
     gap: 24px
 }
 
@@ -29,14 +39,14 @@ header {
     background: white;
     border: 1px solid #ddd5c7;
     border-radius: 16px;
-    padding: 22px;
+    padding: clamp(18px, 4vw, 22px);
     box-shadow: 0 8px 30px #0000000d
 }
 
 label {
     display: block;
     font-weight: 650;
-    margin: 12px 0 6px
+    margin: 14px 0 6px
 }
 
 input, textarea {
@@ -44,23 +54,37 @@ input, textarea {
     box-sizing: border-box;
     border: 1px solid #cfc8ba;
     border-radius: 10px;
-    padding: 10px;
+    padding: 12px;
     font: inherit;
-    margin-top: 6px
+    font-size: 16px;
+    margin-top: 6px;
+    background: #fff
+}
+
+textarea {
+    min-height: 120px;
+    resize: vertical
 }
 
 .check {
     display: flex;
-    gap: 10px;
-    align-items: center
+    gap: 12px;
+    align-items: flex-start;
+    cursor: pointer;
+    line-height: 1.4
 }
 
 .check input {
-    width: auto
+    width: auto;
+    min-width: 20px;
+    min-height: 20px;
+    margin-top: 7px
 }
 
 button {
     margin-top: 20px;
+    width: 100%;
+    min-height: 48px;
     border: 0;
     border-radius: 12px;
     background: #315b3a;
@@ -68,12 +92,15 @@ button {
     padding: 13px 18px;
     font-weight: 750;
     font-size: 16px;
-    cursor: pointer
+    cursor: pointer;
+    touch-action: manipulation
 }
 
 
 .hint {
-    color: #6b655b
+    color: #6b655b;
+    font-size: 0.95rem;
+    line-height: 1.45
 }
 
 .fixed-sheet {
@@ -85,3 +112,31 @@ button {
         grid-template-columns:1fr
     }
 }
+
+@media (max-width: 480px) {
+    main {
+        padding: 14px
+    }
+
+    header {
+        margin-bottom: 18px
+    }
+
+    .grid {
+        gap: 16px
+    }
+
+    .card {
+        border-radius: 14px;
+        padding: 16px
+    }
+
+    label {
+        margin-top: 12px
+    }
+
+    button {
+        margin-top: 18px
+    }
+}
+
