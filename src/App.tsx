@@ -1,9 +1,11 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import type {LabelData} from './types';
 import {generateLabelsPdf} from './pdf/generateLabelsPdf';
 import {getCurrentYearMonthValue, normalizeBatchNumber} from './formatting';
 // @ts-ignore
 import './styles.css';
+
+const LABEL_DATA_STORAGE_KEY = 'farm-label-maker.label-data';
 
 const defaultData: LabelData = {
     title: 'Pilz-Gemüse-Aufstrich',
@@ -13,9 +15,33 @@ const defaultData: LabelData = {
     batchNumber: 'LP0395'
 };
 
+function loadStoredData(): LabelData {
+    if (typeof window === 'undefined') return defaultData;
+
+    try {
+        const raw = window.localStorage.getItem(LABEL_DATA_STORAGE_KEY);
+        if (!raw) return defaultData;
+
+        const parsed = JSON.parse(raw) as Partial<LabelData>;
+        return {
+            title: typeof parsed.title === 'string' ? parsed.title : defaultData.title,
+            keepCooled: typeof parsed.keepCooled === 'boolean' ? parsed.keepCooled : defaultData.keepCooled,
+            ingredients: typeof parsed.ingredients === 'string' ? parsed.ingredients : defaultData.ingredients,
+            productionMonth: typeof parsed.productionMonth === 'string' ? parsed.productionMonth : defaultData.productionMonth,
+            batchNumber: normalizeBatchNumber(typeof parsed.batchNumber === 'string' ? parsed.batchNumber : defaultData.batchNumber),
+        };
+    } catch {
+        return defaultData;
+    }
+}
+
 export default function App() {
-    const [data, setData] = useState(defaultData);
+    const [data, setData] = useState<LabelData>(() => loadStoredData());
     const updateData = (patch: Partial<LabelData>) => setData(d => ({...d, ...patch}));
+
+    useEffect(() => {
+        window.localStorage.setItem(LABEL_DATA_STORAGE_KEY, JSON.stringify(data));
+    }, [data]);
 
     async function downloadPdf() {
         const blob = await generateLabelsPdf(data);
