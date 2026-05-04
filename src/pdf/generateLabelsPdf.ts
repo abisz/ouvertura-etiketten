@@ -2,18 +2,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf
 import type { LabelData } from '../types';
 import { formatManufacturedDate, normalizeBatchNumber } from '../formatting';
 import { A4, mmToPt } from './measurements';
-
-const FIXED_LAYOUT = {
-  rows: 8,
-  columns: 6,
-  marginTopMm: 5,
-  marginLeftMm: 5,
-  gapXMm: 0,
-  gapYMm: 0,
-};
-
-const LABEL_WIDTH_MM = (A4.widthMm - FIXED_LAYOUT.marginLeftMm * 2 - FIXED_LAYOUT.gapXMm * (FIXED_LAYOUT.columns - 1)) / FIXED_LAYOUT.columns;
-const LABEL_HEIGHT_MM = (A4.heightMm - FIXED_LAYOUT.marginTopMm * 2 - FIXED_LAYOUT.gapYMm * (FIXED_LAYOUT.rows - 1)) / FIXED_LAYOUT.rows;
+import { getLabelSheetLayout } from './layoutPresets';
 
 // Base font sizes / spacings at scale 1.0
 const BASE_TITLE_SIZE = 12;
@@ -209,6 +198,26 @@ function fitSingleLine(text: string, maxWidth: number, font: PDFFont, preferredS
   };
 }
 
+function fitMultiLine(
+  lines: string[],
+  maxWidth: number,
+  font: PDFFont,
+  preferredSize: number,
+  minSize: number,
+) {
+  for (let size = preferredSize; size >= minSize; size -= 0.25) {
+    if (lines.every((line) => font.widthOfTextAtSize(line, size) <= maxWidth)) {
+      return { lines, size, lineHeight: size + 1 };
+    }
+  }
+
+  return {
+    lines: lines.map((line) => ellipsizeText(line, maxWidth, font, minSize)),
+    size: minSize,
+    lineHeight: minSize + 1,
+  };
+}
+
 function drawCenteredText(page: PDFPage, text: string, font: PDFFont, size: number, x: number, y: number, width: number, color?: { r: number; g: number; b: number; }) {
   const textWidth = font.widthOfTextAtSize(text, size);
   page.drawText(text, {
@@ -226,27 +235,57 @@ export async function generateLabelsPdf(data: LabelData) {
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageHeight = mmToPt(A4.heightMm);
+  const layout = getLabelSheetLayout(data.labelSheetPreset);
 
-  for (let r = 0; r < FIXED_LAYOUT.rows; r++) {
-    for (let c = 0; c < FIXED_LAYOUT.columns; c++) {
-      const x = mmToPt(FIXED_LAYOUT.marginLeftMm + c * (LABEL_WIDTH_MM + FIXED_LAYOUT.gapXMm));
-      const yTop = pageHeight - mmToPt(FIXED_LAYOUT.marginTopMm + r * (LABEL_HEIGHT_MM + FIXED_LAYOUT.gapYMm));
-      const w = mmToPt(LABEL_WIDTH_MM);
-      const h = mmToPt(LABEL_HEIGHT_MM);
+  const labelWidthMm = (A4.widthMm - layout.marginLeftMm * 2 - layout.gapXMm * (layout.columns - 1)) / layout.columns;
+  const labelHeightMm = (A4.heightMm - layout.marginTopMm * 2 - layout.gapYMm * (layout.rows - 1)) / layout.rows;
+
+  for (let r = 0; r < layout.rows; r++) {
+    for (let c = 0; c < layout.columns; c++) {
+      const cellX = mmToPt(layout.marginLeftMm + c * (labelWidthMm + layout.gapXMm));
+      const cellYTop = pageHeight - mmToPt(layout.marginTopMm + r * (labelHeightMm + layout.gapYMm));
+      const cellW = mmToPt(labelWidthMm);
+      const cellH = mmToPt(labelHeightMm);
+
+      let x = cellX;
+      let yTop = cellYTop;
+      let w = cellW;
+      let h = cellH;
+
+      if (layout.shape === 'round') {
+        const diameter = Math.min(cellW, cellH);
+        x = cellX + (cellW - diameter) / 2;
+        yTop = cellYTop - (cellH - diameter) / 2;
+        w = diameter;
+        h = diameter;
+      }
+
       const pad = mmToPt(2);
-      const contentWidth = w - pad * 2;
-      const topY = yTop - pad;               // top edge of content area
-      const contentHeight = h - 2 * pad;    // total usable height
+      const safeAreaFactor = layout.shape === 'round' ? (layout.roundSafeAreaFactor ?? 0.7) : 1;
+      const safeWidth = layout.shape === 'round' ? w * safeAreaFactor : w - pad * 2;
+      const safeHeight = layout.shape === 'round' ? h * safeAreaFactor : h - pad * 2;
+      const contentX = x + (w - safeWidth) / 2;
+      const topY = yTop - (h - safeHeight) / 2;
+      const contentWidth = safeWidth;
+      const contentHeight = safeHeight;
 
       const titleText = data.title.trim() || 'Product name';
       const ingredientText = data.ingredients.trim() || 'Ingredients';
-      const footer = `${formatManufacturedDate(data.productionMonth)} · ${normalizeBatchNumber(data.batchNumber)}`;
+      const manufacturedDate = formatManufacturedDate(data.productionMonth);
+      const batchNumber = normalizeBatchNumber(data.batchNumber);
+      const isRound = layout.shape === 'round';
+      const footerLines = isRound
+        ? [manufacturedDate, batchNumber]
+        : [`${manufacturedDate} · ${batchNumber}`];
 
-      // Footer is always a short fixed-format line; shrink font if needed.
-      const footerLayout = fitSingleLine(footer, contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN);
+      // Footer stays centered and shrinks when needed to preserve content fit.
+      const footerLayout = footerLines.length === 1
+        ? { lines: footerLines, lineHeight: 0, ...fitSingleLine(footerLines[0], contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN) }
+        : fitMultiLine(footerLines, contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN);
 
       // Space available for the body (title + cool + ingredients); footer + gap sit below.
-      const availableHeight = contentHeight - footerLayout.size - FOOTER_GAP;
+      const footerHeight = footerLayout.size + Math.max(0, footerLayout.lines.length - 1) * footerLayout.lineHeight;
+      const availableHeight = contentHeight - footerHeight - FOOTER_GAP;
 
       const {
         titleSize, titleLineHeight, titleLines,
@@ -264,11 +303,12 @@ export async function generateLabelsPdf(data: LabelData) {
 
       // Footer sits FOOTER_GAP below the last drawn element's baseline.
       // We subtract footerSize so the footer's cap height clears the content above by FOOTER_GAP.
-      const footerRelY = lastYRel - footerLayout.size - FOOTER_GAP;
+      const footerFirstRelY = lastYRel - footerLayout.size - FOOTER_GAP;
+      const footerLastRelY = footerFirstRelY - Math.max(0, footerLayout.lines.length - 1) * footerLayout.lineHeight;
 
       // Visual block height: from cap of title (≈ titleSize above first baseline)
       // down to the footer baseline.
-      const blockHeight = titleSize - footerRelY; // footerRelY ≤ 0, so this is positive
+      const blockHeight = titleSize - footerLastRelY; // footerLastRelY ≤ 0, so this is positive
 
       // Vertical centering: push block down so equal whitespace appears top and bottom.
       const topPadding = Math.max(0, (contentHeight - blockHeight) / 2);
@@ -279,23 +319,33 @@ export async function generateLabelsPdf(data: LabelData) {
       // --- Draw ---
       let y = firstTitleBaseline;
       for (const line of titleLines) {
-        drawCenteredText(page, line, bold, titleSize, x, y, w);
+        drawCenteredText(page, line, bold, titleSize, contentX, y, contentWidth);
         y -= titleLineHeight;
       }
 
       if (data.keepCooled) {
-        drawCenteredText(page, '(kühl lagern)', regular, coolSize, x, y, w);
+        drawCenteredText(page, '(kühl lagern)', regular, coolSize, contentX, y, contentWidth);
         y -= coolLineHeight;
       }
 
       for (const line of ingredientLines) {
-        drawCenteredText(page, line, regular, ingredientSize, x, y, w);
+        drawCenteredText(page, line, regular, ingredientSize, contentX, y, contentWidth);
         y -= ingredientLineHeight;
       }
 
       // Footer: right after the ingredients, centered.
-      drawCenteredText(page, footerLayout.text, regular, footerLayout.size,
-        x, firstTitleBaseline + footerRelY, w, { r: 0.25, g: 0.25, b: 0.25 });
+      for (let i = 0; i < footerLayout.lines.length; i++) {
+        drawCenteredText(
+          page,
+          footerLayout.lines[i],
+          regular,
+          footerLayout.size,
+          contentX,
+          firstTitleBaseline + footerFirstRelY - i * footerLayout.lineHeight,
+          contentWidth,
+          { r: 0.25, g: 0.25, b: 0.25 },
+        );
+      }
     }
   }
   const bytes = await pdf.save();

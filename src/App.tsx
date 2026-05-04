@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import type {LabelData} from './types';
 import {generateLabelsPdf} from './pdf/generateLabelsPdf';
 import {getCurrentYearMonthValue, normalizeBatchNumber} from './formatting';
+import {LABEL_SHEET_LAYOUTS} from './pdf/layoutPresets';
 // @ts-ignore
 import './styles.css';
 
@@ -12,8 +13,13 @@ const defaultData: LabelData = {
     keepCooled: true,
     ingredients: 'Melanzani, Tomate, Kräuterseitling, Shiitake, Nameko, Sonnenblumenöl und -kerne, Zwiebel, Knoblauch, Zitrone, Salz, Pfeffer, Oregano, Lorbeer.',
     productionMonth: getCurrentYearMonthValue(),
-    batchNumber: 'LP0395'
+    batchNumber: 'LP0395',
+    labelSheetPreset: 'rect-8x6'
 };
+
+function normalizeSheetPreset(value: unknown): LabelData['labelSheetPreset'] {
+    return value === 'round-6x4' ? 'round-6x4' : 'rect-8x6';
+}
 
 function loadStoredData(): LabelData {
     if (typeof window === 'undefined') return defaultData;
@@ -29,6 +35,7 @@ function loadStoredData(): LabelData {
             ingredients: typeof parsed.ingredients === 'string' ? parsed.ingredients : defaultData.ingredients,
             productionMonth: typeof parsed.productionMonth === 'string' ? parsed.productionMonth : defaultData.productionMonth,
             batchNumber: normalizeBatchNumber(typeof parsed.batchNumber === 'string' ? parsed.batchNumber : defaultData.batchNumber),
+            labelSheetPreset: normalizeSheetPreset(parsed.labelSheetPreset),
         };
     } catch {
         return defaultData;
@@ -67,7 +74,15 @@ export default function App() {
                                                 onChange={e => updateData({productionMonth: e.target.value})}/></label>
                 <label>Chargennummer<input value={data.batchNumber}
                                                    onChange={e => updateData({batchNumber: normalizeBatchNumber(e.target.value)})}/></label>
-                <p className="hint fixed-sheet">Für Etikettenpapier: A4, 8 Zeilen x 6 Spalten (48 Etiketten).</p>
+                <label>Etikettenpapier
+                    <select value={data.labelSheetPreset}
+                            onChange={e => updateData({labelSheetPreset: normalizeSheetPreset(e.target.value)})}>
+                        {Object.entries(LABEL_SHEET_LAYOUTS).map(([key, layout]) => (
+                            <option key={key} value={key}>{layout.uiName}</option>
+                        ))}
+                    </select>
+                </label>
+                <p className="hint fixed-sheet">{LABEL_SHEET_LAYOUTS[data.labelSheetPreset].uiHint}</p>
                 <button type="button" onClick={downloadPdf}>Download A4 PDF</button>
             </form>
         </section>

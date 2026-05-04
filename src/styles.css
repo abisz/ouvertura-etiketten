@@ -49,7 +49,7 @@ label {
     margin: 14px 0 6px
 }
 
-input, textarea {
+input, textarea, select {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid #cfc8ba;
