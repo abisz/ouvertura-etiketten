@@ -7,8 +7,8 @@ import { getLabelSheetLayout } from './layoutPresets';
 // Base font sizes / spacings at scale 1.0
 const BASE_TITLE_SIZE = 12;
 const BASE_INGREDIENT_SIZE = 8.5;
-const BASE_COOL_SIZE = 8;
-const BASE_COOL_LINE_HEIGHT = 12; // text size + leading, applied as y-decrement after the cool line
+const BASE_NOTICE_SIZE = 8;
+const BASE_NOTICE_LINE_HEIGHT = 12; // text size + leading, applied as y-decrement after each notice line
 const FOOTER_FONT_MAX = 7.5;
 const FOOTER_FONT_MIN = 6;
 const FOOTER_GAP = 2; // minimum gap between last ingredient baseline and footer
@@ -125,8 +125,8 @@ interface FitResult {
   titleSize: number;
   titleLineHeight: number;
   titleLines: string[];
-  coolSize: number;
-  coolLineHeight: number;
+  noticeSize: number;
+  noticeLineHeight: number;
   ingredientSize: number;
   ingredientLineHeight: number;
   ingredientLines: string[];
@@ -134,21 +134,21 @@ interface FitResult {
 
 /**
  * Finds the largest uniform scale factor (applied to all base font sizes) such that
- * the complete title + optional cool-line + all ingredient lines fit within `availableHeight`.
+ * the complete title + optional notice lines + all ingredient lines fit within `availableHeight`.
  * Nothing is ever truncated.
  *
  * Height model (y decreases downward in PDF space):
  *   - first title baseline : topY - titleSize
  *   - after N title lines  : descend N * titleLineHeight
- *   - after cool line      : descend coolLineHeight (if keepCooled)
+ *   - after notice lines   : descend noticeLineHeight for each notice
  *   - N ingredient lines at y, y-iLH, …, y-(M-1)*iLH
  *
- * Constraint: titleSize + N*tLH + coolLH + (M-1)*iLH ≤ availableHeight
+ * Constraint: titleSize + N*tLH + noticeCount*noticeLineHeight + (M-1)*iLH ≤ availableHeight
  */
 function fitContent(
   titleText: string,
   ingredientText: string,
-  keepCooled: boolean,
+  noticeCount: number,
   availableHeight: number,
   contentWidth: number,
   bold: PDFFont,
@@ -162,8 +162,8 @@ function fitContent(
     const titleLineHeight = titleSize + 1;
     const ingredientSize = BASE_INGREDIENT_SIZE * s;
     const ingredientLineHeight = ingredientSize + 1.5;
-    const coolSize = BASE_COOL_SIZE * s;
-    const coolLineHeight = BASE_COOL_LINE_HEIGHT * s;
+    const noticeSize = BASE_NOTICE_SIZE * s;
+    const noticeLineHeight = BASE_NOTICE_LINE_HEIGHT * s;
 
     const titleLines = wrapText(titleText, contentWidth, bold, titleSize, false);
     const ingredientLines = wrapText(ingredientText, contentWidth, regular, ingredientSize);
@@ -171,12 +171,12 @@ function fitContent(
     const heightUsed =
       titleSize +
       titleLines.length * titleLineHeight +
-      (keepCooled ? coolLineHeight : 0) +
+      noticeCount * noticeLineHeight +
       Math.max(0, ingredientLines.length - 1) * ingredientLineHeight;
 
     const result: FitResult = {
       titleSize, titleLineHeight, titleLines,
-      coolSize, coolLineHeight,
+      noticeSize, noticeLineHeight,
       ingredientSize, ingredientLineHeight, ingredientLines,
     };
 
@@ -283,22 +283,27 @@ export async function generateLabelsPdf(data: LabelData) {
         ? { lines: footerLines, lineHeight: 0, ...fitSingleLine(footerLines[0], contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN) }
         : fitMultiLine(footerLines, contentWidth, regular, FOOTER_FONT_MAX, FOOTER_FONT_MIN);
 
-      // Space available for the body (title + cool + ingredients); footer + gap sit below.
+      const noticeLines = [
+        ...(data.keepCooled ? ['(kühl lagern)'] : []),
+        ...(data.boilBeforeEating ? ['(Vor Verzehr aufkochen)'] : []),
+      ];
+
+      // Space available for the body (title + notices + ingredients); footer + gap sit below.
       const footerHeight = footerLayout.size + Math.max(0, footerLayout.lines.length - 1) * footerLayout.lineHeight;
       const availableHeight = contentHeight - footerHeight - FOOTER_GAP;
 
       const {
         titleSize, titleLineHeight, titleLines,
-        coolSize, coolLineHeight,
+        noticeSize, noticeLineHeight,
         ingredientSize, ingredientLineHeight, ingredientLines,
-      } = fitContent(titleText, ingredientText, data.keepCooled, availableHeight, contentWidth, bold, regular);
+      } = fitContent(titleText, ingredientText, noticeLines.length, availableHeight, contentWidth, bold, regular);
 
       // --- Relative layout simulation (y = 0 at first title baseline) ---
       // Tracks how far each element is below the first title baseline.
       let yRel = 0;
       let lastYRel = 0;
       for (const _ of titleLines)     { lastYRel = yRel; yRel -= titleLineHeight; }
-      if (data.keepCooled)             { lastYRel = yRel; yRel -= coolLineHeight; }
+      for (const _ of noticeLines)     { lastYRel = yRel; yRel -= noticeLineHeight; }
       for (const _ of ingredientLines) { lastYRel = yRel; yRel -= ingredientLineHeight; }
 
       // Footer sits FOOTER_GAP below the last drawn element's baseline.
@@ -323,9 +328,9 @@ export async function generateLabelsPdf(data: LabelData) {
         y -= titleLineHeight;
       }
 
-      if (data.keepCooled) {
-        drawCenteredText(page, '(kühl lagern)', regular, coolSize, contentX, y, contentWidth);
-        y -= coolLineHeight;
+      for (const line of noticeLines) {
+        drawCenteredText(page, line, regular, noticeSize, contentX, y, contentWidth);
+        y -= noticeLineHeight;
       }
 
       for (const line of ingredientLines) {

@@ -11,6 +11,7 @@ const LABEL_DATA_STORAGE_KEY = 'farm-label-maker.label-data';
 const defaultData: LabelData = {
     title: 'Pilz-Gemüse-Aufstrich',
     keepCooled: true,
+    boilBeforeEating: false,
     ingredients: 'Melanzani, Tomate, Kräuterseitling, Shiitake, Nameko, Sonnenblumenöl und -kerne, Zwiebel, Knoblauch, Zitrone, Salz, Pfeffer, Oregano, Lorbeer.',
     productionMonth: getCurrentYearMonthValue(),
     batchNumber: 'LP0395',
@@ -32,6 +33,7 @@ function loadStoredData(): LabelData {
         return {
             title: typeof parsed.title === 'string' ? parsed.title : defaultData.title,
             keepCooled: typeof parsed.keepCooled === 'boolean' ? parsed.keepCooled : defaultData.keepCooled,
+            boilBeforeEating: typeof parsed.boilBeforeEating === 'boolean' ? parsed.boilBeforeEating : defaultData.boilBeforeEating,
             ingredients: typeof parsed.ingredients === 'string' ? parsed.ingredients : defaultData.ingredients,
             productionMonth: typeof parsed.productionMonth === 'string' ? parsed.productionMonth : defaultData.productionMonth,
             batchNumber: normalizeBatchNumber(typeof parsed.batchNumber === 'string' ? parsed.batchNumber : defaultData.batchNumber),
@@ -68,6 +70,8 @@ export default function App() {
                                            onChange={e => updateData({title: e.target.value})}/></label>
                 <label className="check"><input type="checkbox" checked={data.keepCooled}
                                                 onChange={e => updateData({keepCooled: e.target.checked})}/>Kühl lagern</label>
+                <label className="check"><input type="checkbox" checked={data.boilBeforeEating}
+                                                onChange={e => updateData({boilBeforeEating: e.target.checked})}/>Vor Verzehr aufkochen</label>
                 <label>Zutaten<textarea rows={5} value={data.ingredients}
                                             onChange={e => updateData({ingredients: e.target.value})}/></label>
                 <label>Herstellungsmonat<input type="month" value={data.productionMonth}
